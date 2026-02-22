@@ -194,8 +194,8 @@ def submit_relay_transaction(request: dict, builder_config) -> str:
         The transaction ID from the relayer.
     """
     body = json.dumps(request)
-    headers = builder_config.generate_builder_headers("POST", "/submit", body)
-    headers["Content-Type"] = "application/json"
+    builder_headers = builder_config.generate_builder_headers("POST", "/submit", body)
+    headers = {**builder_headers.to_dict(), "Content-Type": "application/json"}
 
     resp = requests.post(f"{RELAYER_URL}/submit", headers=headers, data=body)
     if not resp.ok:
