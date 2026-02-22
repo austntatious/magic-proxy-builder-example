@@ -100,19 +100,24 @@ def get_collection_id(condition_id: str, index_set: int) -> bytes:
     """
     Compute the collection ID for a specific outcome of a condition.
 
-    collection_id = keccak256(parentCollectionId ++ conditionId ++ indexSet_bytes32)
+    Matches the Gnosis CTF contract formula:
+        collectionId = bytes32(uint256(parentCollectionId) +
+                               uint256(keccak256(abi.encodePacked(conditionId, indexSet))))
     """
     cond_bytes = bytes.fromhex(condition_id[2:]) if condition_id.startswith("0x") else bytes.fromhex(condition_id)
     index_set_bytes = index_set.to_bytes(32, byteorder="big")
-    return keccak(PARENT_COLLECTION_ID + cond_bytes + index_set_bytes)
+    hash_part = int.from_bytes(keccak(cond_bytes + index_set_bytes), byteorder="big")
+    parent_int = int.from_bytes(PARENT_COLLECTION_ID, byteorder="big")
+    result = (parent_int + hash_part) % (2**256)
+    return result.to_bytes(32, byteorder="big")
 
 
 def get_position_id(condition_id: str, index_set: int) -> int:
     """
     Compute the ERC1155 token ID (position ID) for a specific outcome.
 
-    This is used to query balanceOf on the CTF contract.
-    position_id = uint256(keccak256(collectionId ++ collateralToken_bytes32))
+    Matches the Gnosis CTF contract formula:
+        positionId = uint256(keccak256(abi.encodePacked(collateralToken, collectionId)))
 
     Args:
         condition_id: The market's condition ID (bytes32 hex string).
@@ -122,8 +127,8 @@ def get_position_id(condition_id: str, index_set: int) -> int:
         The ERC1155 token ID as an integer.
     """
     collection_id = get_collection_id(condition_id, index_set)
-    collateral_bytes = bytes(12) + bytes.fromhex(USDC_E[2:])  # left-pad address to 32 bytes
-    return int.from_bytes(keccak(collection_id + collateral_bytes), byteorder="big")
+    collateral_bytes = bytes.fromhex(USDC_E[2:])  # 20-byte address (encodePacked, no padding)
+    return int.from_bytes(keccak(collateral_bytes + collection_id), byteorder="big")
 
 
 def get_outcome_token_balance(w3: Web3, proxy_address: str, condition_id: str, index_set: int) -> int:
