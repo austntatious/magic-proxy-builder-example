@@ -32,7 +32,7 @@ import time
 
 from dotenv import load_dotenv
 from eth_account import Account
-from py_builder_signing_sdk import BuilderApiKeyCreds, BuilderConfig
+from py_builder_signing_sdk.config import BuilderApiKeyCreds, BuilderConfig
 from web3 import Web3
 
 from magic_proxy.approvals import check_all_approvals, get_missing_approval_txs
