@@ -17,6 +17,10 @@ PARENT_COLLECTION_ID = b"\x00" * 32
 # Binary market partition: outcome 0 = indexSet 1, outcome 1 = indexSet 2
 BINARY_PARTITION = [1, 2]
 
+# alt_bn128 curve: y² = x³ + B over F_P
+_BN128_P = 21888242871839275222246405745257275088696311157297823662689037894645226208583
+_BN128_B = 3
+
 # Shared web3 + contract instances for ABI encoding
 _w3 = Web3()
 _ctf = _w3.eth.contract(address=Web3.to_checksum_address(CTF_CONTRACT), abi=CTF_ABI)
@@ -96,20 +100,48 @@ def create_redeem_positions_tx(
     return {"to": CTF_CONTRACT, "data": data, "value": "0"}
 
 
+def _bn128_sqrt(a: int) -> int:
+    """Modular square root on alt_bn128. P ≡ 3 (mod 4) so sqrt(a) = a^((P+1)/4)."""
+    return pow(a, (_BN128_P + 1) // 4, _BN128_P)
+
+
 def get_collection_id(condition_id: str, index_set: int) -> bytes:
     """
     Compute the collection ID for a specific outcome of a condition.
 
-    Matches the Gnosis CTF contract formula:
-        collectionId = bytes32(uint256(parentCollectionId) +
-                               uint256(keccak256(abi.encodePacked(conditionId, indexSet))))
+    Reimplements the Gnosis CTF CTHelpers.getCollectionId which uses
+    alt_bn128 hash-to-curve (NOT simple uint256 addition).
+
+    For parentCollectionId = 0 (Polymarket top-level positions):
+    1. Hash keccak256(conditionId ++ indexSet) to get initial x
+    2. Find nearest valid point on y² = x³ + 3
+    3. Encode y-parity in bit 254 of x
     """
     cond_bytes = bytes.fromhex(condition_id[2:]) if condition_id.startswith("0x") else bytes.fromhex(condition_id)
     index_set_bytes = index_set.to_bytes(32, byteorder="big")
-    hash_part = int.from_bytes(keccak(cond_bytes + index_set_bytes), byteorder="big")
-    parent_int = int.from_bytes(PARENT_COLLECTION_ID, byteorder="big")
-    result = (parent_int + hash_part) % (2**256)
-    return result.to_bytes(32, byteorder="big")
+
+    x1 = int.from_bytes(keccak(cond_bytes + index_set_bytes), byteorder="big")
+    odd = (x1 >> 255) != 0
+
+    # Hash-to-curve: increment x until x³ + 3 is a quadratic residue mod P
+    while True:
+        x1 = (x1 + 1) % _BN128_P
+        yy = (pow(x1, 3, _BN128_P) + _BN128_B) % _BN128_P
+        y1 = _bn128_sqrt(yy)
+        if (y1 * y1) % _BN128_P == yy:
+            break
+
+    # Match y-parity to the oddness flag from the hash
+    if (odd and y1 % 2 == 0) or (not odd and y1 % 2 == 1):
+        y1 = _BN128_P - y1
+
+    # parentCollectionId = 0 → skip EC point addition
+
+    # Encode y-parity in bit 254
+    if y1 % 2 == 1:
+        x1 ^= (1 << 254)
+
+    return x1.to_bytes(32, byteorder="big")
 
 
 def get_position_id(condition_id: str, index_set: int) -> int:
